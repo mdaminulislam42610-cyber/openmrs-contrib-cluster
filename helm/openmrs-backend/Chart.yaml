@@ -26,21 +26,21 @@ appVersion: "nightly-core-2.8"
 dependencies:
   - name: mariadb
     version: 22.0.0
-    repository: https://docker.io/bitnamilegacy
+    repository: https://charts.bitnami.com/bitnami
     condition: mariadb.enabled
 
   - name: mariadb-galera
     version: 16.0.0
-    repository: https://docker.io/bitnamilegacy
+    repository: https://charts.bitnami.com/bitnami
     condition: galera.enabled
     alias: galera
 
   - name: elasticsearch
     version: 22.0.0
-    repository: https://docker.io/bitnamilegacy
+    repository: https://charts.bitnami.com/bitnami
     condition: elasticsearch.enabled
 
   - name: minio
     version: 17.0.16
-    repository: https://docker.io/bitnamilegacy
+    repository: https://charts.bitnami.com/bitnami
     condition: minio.enabled

@@ -62,8 +62,16 @@ First, deploy only the database to ensure it's running and accessible:
 ```bash
 cd helm/openmrs-backend
 
+# IMPORTANT: Add Bitnami Helm repository first (if not already added)
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+
 # Update Helm dependencies
+# This downloads the required MariaDB, Elasticsearch, and MinIO charts
 helm dependency update
+
+# Verify dependencies are downloaded
+ls -la charts/
 
 # Deploy MariaDB only (backend disabled temporarily)
 helm upgrade --install openmrs-db . \
