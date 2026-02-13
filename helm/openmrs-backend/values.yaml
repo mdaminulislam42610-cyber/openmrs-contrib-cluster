@@ -1,0 +1,257 @@
+# Default values for openmrs-backend.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+global:
+  defaultStorageClass: "local-path"
+  defaultIngressClass: "nginx"
+  security:
+    allowInsecureImages: true
+
+replicaCount: 1
+
+image:
+  repository: openmrs/openmrs-reference-application-3-backend
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+infinispan:
+  clustered: false
+  bind_port: 7800
+
+db:
+  hostname: mariadb
+  port: 3306
+  username: openmrs
+  password: OpenMRS123
+
+galera:
+  enabled: false
+  image:
+    repository: bitnamilegacy/mariadb-galera
+    tag: 10.11
+  rootUser:
+    password: Root123
+  db:
+    name: openmrs
+    user: openmrs
+    password: OpenMRS123
+  galera:
+    mariabackup:
+      password: Backup123
+
+mariadb:
+  enabled: true
+  image:
+    repository: bitnamilegacy/mariadb
+    tag: 10.11
+  architecture: standalone
+  auth:
+    rootPassword: Root123
+    database: openmrs
+    username: openmrs
+    password: OpenMRS123
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+      storageClass: "local-path"
+
+elasticsearch:
+  enabled: false
+  image:
+    repository: bitnamilegacy/elasticsearch
+    tag: 9.1.2
+  volumePermissions:
+    image:
+      repository: bitnamilegacy/os-shell
+  sysctlImage:
+    repository: bitnamilegacy/os-shell
+  service:
+    ports:
+      restAPI: 9200
+  plugins: "analysis-phonetic"
+  # Set up Elastic search as single node
+  master:
+    masterOnly: false
+    replicaCount: 1
+    heapSize: 128m
+    resources:
+      limits:
+        cpu: 750m
+        ephemeral-storage: 2Gi
+        memory: 768Mi
+      requests:
+        cpu: 500m
+        ephemeral-storage: 50Mi
+        memory: 512Mi
+    persistence:
+      enabled: true
+      size: 8Gi
+
+  data:
+    replicaCount: 0
+    heapSize: 1024m
+    resources:
+      limits:
+        cpu: 750m
+        ephemeral-storage: 2Gi
+        memory: 1536Mi
+      requests:
+        cpu: 500m
+        ephemeral-storage: 50Mi
+        memory: 1024Mi
+    persistence:
+      enabled: true
+      size: 8Gi
+
+  coordinating:
+    replicaCount: 0
+    heapSize: 128m
+    resources:
+      limits:
+        cpu: 750m
+        ephemeral-storage: 2Gi
+        memory: 768Mi
+      requests:
+        cpu: 500m
+        ephemeral-storage: 50Mi
+        memory: 512Mi
+
+  ingest:
+    replicaCount: 0
+    heapSize: 128m
+    resources:
+      limits:
+        cpu: 750m
+        ephemeral-storage: 2Gi
+        memory: 768Mi
+      requests:
+        cpu: 500m
+        ephemeral-storage: 50Mi
+        memory: 512Mi
+
+minio:
+  enabled: false
+  image:
+    repository: bitnamilegacy/minio
+    tag: 2025.7.23
+  clientImage:
+    repository: bitnamilegacy/minio-client
+  defaultInitContainers:
+    volumePermissions:
+      image:
+        repository: bitnamilegacy/os-shell
+  console:
+    image:
+      repository: bitnamilegacy/minio-object-browser
+  mode: distributed
+  auth:
+    rootPassword: Root1234
+  statefulset:
+    replicaCount: 4
+    zones: 1
+    drivesPerNode: 1
+  provisioning:
+    enabled: true
+    buckets:
+      - name: openmrs
+    users:
+      - username: openmrs
+        password: OpenMRS123
+        policies: ["readwrite"]
+
+imagePullSecrets: []
+
+persistence:
+  enabled: true
+  size: 8Gi
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Automatically mount a ServiceAccount's API credentials?
+  automount: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  fsGroup: 1001
+  runAsUser: 1001
+  fsGroupChangePolicy: "Always"
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1001
+
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "http-cookie"
+    nginx.ingress.kubernetes.io/session-cookie-expires: "43200" # 12h
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "43200" # 12h
+  rules:
+    - http:
+      paths:
+        - path: /openmrs/
+          pathType: Prefix
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+resources:
+  limits:
+     cpu: 1.0
+     memory: 2Gi
+  requests:
+     cpu: 200m
+     memory: 1536Mi
+
+livenessProbe:
+  httpGet:
+    path: /openmrs/health/alive
+    port: 8080
+  failureThreshold: 3
+  timeoutSeconds: 1
+  periodSeconds: 10
+readinessProbe:
+  httpGet:
+    path: /openmrs/health/started
+    port: 8080
+  failureThreshold: 1
+  timeoutSeconds: 1
+  periodSeconds: 10
+startupProbe:
+  httpGet:
+    path: /openmrs/health/alive
+    port: 8080
+  initialDelaySeconds: 20
+  failureThreshold: 120 # wait for max 20 minutes to startup
+  timeoutSeconds: 1
+  periodSeconds: 10
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80

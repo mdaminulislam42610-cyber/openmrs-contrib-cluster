@@ -1,0 +1,95 @@
+# Values file for k3s single-node deployment
+# Usage: helm upgrade --install openmrs ./helm/openmrs --namespace openmrs -f helm/k3s-openmrs-values.yaml
+
+global:
+  defaultStorageClass: "local-path"
+  defaultIngressClass: "nginx"
+  security:
+    allowInsecureImages: true
+
+openmrs-backend:
+  nameOverride: "backend"
+  
+  replicaCount: 1
+  
+  infinispan:
+    clustered: false
+    bind_port: 7800
+  
+  # Database configuration - standalone mode for single node
+  mariadb:
+    enabled: true
+    architecture: standalone
+    image:
+      repository: bitnamilegacy/mariadb
+      tag: 10.11
+    auth:
+      rootPassword: Root123
+      database: openmrs
+      username: openmrs
+      password: OpenMRS123
+    primary:
+      persistence:
+        enabled: true
+        size: 8Gi
+        storageClass: "local-path"
+  
+  # Disable other database options
+  galera:
+    enabled: false
+  
+  # Disable optional components for minimal setup
+  elasticsearch:
+    enabled: false
+  
+  minio:
+    enabled: false
+  
+  # Persistence for backend data
+  persistence:
+    enabled: true
+    size: 8Gi
+  
+  # Ingress configuration
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/affinity: "cookie"
+      nginx.ingress.kubernetes.io/session-cookie-name: "http-cookie"
+      nginx.ingress.kubernetes.io/session-cookie-expires: "43200"
+      nginx.ingress.kubernetes.io/session-cookie-max-age: "43200"
+    rules:
+      - http:
+          paths:
+            - path: /openmrs/
+              pathType: Prefix
+  
+  # Resource limits for single node
+  resources:
+    limits:
+      cpu: 1.0
+      memory: 2Gi
+    requests:
+      cpu: 200m
+      memory: 1536Mi
+
+openmrs-frontend:
+  enabled: true
+  nameOverride: "frontend"
+  
+  replicaCount: 1
+  
+  # Ingress configuration
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/use-regex: "true"
+      nginx.ingress.kubernetes.io/rewrite-target: /$2
+      nginx.ingress.kubernetes.io/app-root: /openmrs/spa/home
+    rules:
+      - http:
+          paths:
+            - path: /openmrs/spa(/|$)(.*)
+              pathType: ImplementationSpecific

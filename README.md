@@ -1,0 +1,289 @@
+# openmrs-contrib-cluster
+Contains terraform and helm charts to deploy OpenMRS distro in a cluster.
+
+Terraform setup is borrowed from Bahmni https://github.com/Bahmni/bahmni-infra (please see the terraform directory). It has been further adjusted for general use in other OpenMRS distributions.
+
+## Overview
+
+See https://openmrs.atlassian.net/wiki/x/tgBLCw for more details.
+
+## Other options
+
+### AWS
+
+If you intend to deploy on AWS and you are intersted in a solution that runs natively on AWS and is not easily movable to on-prem or any other cloud provider you may want to have a look at https://github.com/openmrs/openmrs-contrib-cluster-aws-ecs It showcases the usage of AWS CDK instead of Terraform for setting up an ECS cluster instead of Kubernetes. It also utilizes AWS Fargate and AWS Aurora managed services for high availability and scalability. 
+
+At this point we did not add support for AWS Fargate and AWS Aurora for Kubernetes deployment as part of our general solution in this repo, but we may do that in the future if there is enough interest or a contribution.
+
+## Usage
+
+### Helm
+
+We recommend https://kind.sigs.k8s.io/ for local testing.
+
+To install on Mac OS:
+
+      brew install kubectl
+      brew install helm
+      brew install kind
+
+Other install options: 
+1. https://kubernetes.io/docs/tasks/tools/
+2. https://helm.sh/docs/intro/install
+3. https://kind.sigs.k8s.io/docs/user/quick-start/#installing-from-release-binaries
+
+
+Make sure that Docker is running and issue the following commands:
+
+ 
+      cd helm
+      kind create cluster --config=kind-config.yaml
+
+      # Set kubectl context to your local kind cluster
+      kubectl cluster-info --context kind-kind
+      
+      # Create local path provisioner and ingress
+      kubectl apply -f kind-init.yaml
+
+      # Setup Kubernetes Dashboard
+      helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/
+      helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard --create-namespace --namespace kubernetes-dashboard --set extraArgs="--token-ttl=0"
+      # Create token for login
+      kubectl -n kubernetes-dashboard create token admin-user
+      kubectl -n kubernetes-dashboard port-forward svc/kubernetes-dashboard-kong-proxy 8443:443
+      # Go to http://localhost:8443/ and login with generated token
+
+How to try it out?
+
+From local source:
+
+      helm upgrade --install --create-namespace -n openmrs --values ../kind-openmrs.yaml openmrs .
+
+or from registry:
+
+      helm upgrade --install --create-namespace -n openmrs --set global.defaultStorageClass=standard --set global.defaultIngressClass=nginx openmrs oci://ghcr.io/openmrs/openmrs
+
+or if you want to use mariadb-galera cluster instead of mariadb with basic primary-secondary replication:
+
+      helm upgrade --install --create-namespace -n openmrs --set global.defaultStorageClass=standard --set global.defaultIngressClass=nginx --set openmrs-backend.mariadb.enabled=false --set openmrs-backend.galera.enabled=true openmrs oci://ghcr.io/openmrs/openmrs
+
+
+Once installed you will see instructions on how to configure port-forwarding and access the instance. If you deploy to a cloud provider you will need to adjust the ingress configuration per https://kubernetes.github.io/ingress-nginx/deploy/#cloud-deployments
+
+If running locally run:
+
+      kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8080:80
+
+#### Parameters
+
+##### Global parameters
+
+| Name                      | Description                                                                             | Value   |
+| ------------------------- |-----------------------------------------------------------------------------------------|---------|
+| `defaultStorageClass`     | Global default StorageClass for Persistent Volume(s)                                    | `"gp2"` |
+
+#### Common parameters
+
+Prepend with the name of the service: `openmrs-backend`, `openmrs-frontend`, `openrms-gateway`, `openmrs-backend.mariadb`, `openmrs-backend.galera`.
+
+| Name                | Description                  | Default Value                                            |
+|---------------------|------------------------------|----------------------------------------------------------|
+| `.image.repository` | Image to use for the service | `e.g. "openmrs/openmrs-reference-application-3-backend"` |
+| `.image.tag`        | Tag to use for the service   | `e.g. "3.0.0"`                                           |
+
+
+#### OpenMRS-backend parameters
+
+| Name                                                             | Description                                                                                                            | Default Value                                             |
+|------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------|
+| `openmrs-backend.db.hostname`                                    | Hostname for OpenMRS DB                                                                                                | `""` or defaults to galera or mariadb hostname if enabled |
+| `openmrs-backend.persistance.size`                               | Size of persistent volume to claim (for search index, attachments, etc.)                                               | `"8Gi"`                                                   |
+| `openmrs-backend.mariadb.enabled`                                | Create MariaDB with read-only replica                                                                                  | `"true"`                                                  |
+| `openmrs-backend.mariadb.primary.persistence.storageClass`       | MariaDB primary persistent volume storage Class                                                                        | `global.defaultStorageClass`                              |
+| `openmrs-backend.mariadb.secondary.persistence.storageClass`     | MariaDB secondary persistent volume storage Class                                                                      | `global.defaultStorageClass`                              |
+| `openmrs-backend.mariadb.auth.rootPassword`                      | Password for the `root` user. Ignored if existing secret is provided.                                                  | `"true"`                                                  |
+| `openmrs-backend.mariadb.auth.database`                          | Name for an OpenMRS database                                                                                           | `"openmrs"`                                               |
+| `openmrs-backend.mariadb.auth.username`                          | Name for a DB user                                                                                                     | `"openmrs"`                                               |
+| `openmrs-backend.mariadb.auth.password`                          | Name for a DB user's password                                                                                          | `"OpenMRS123"`                                            |
+| `openmrs-backend.galera.enabled`                                 | Create MariaDB Galera cluster with 3 nodes (default)                                                                   | `"true"`                                                  |
+| `openmrs-backend.galera.rootUser.password`                       | Password for the `root` user. Ignored if existing secret is provided.                                                  | `"true"`                                                  |
+| `openmrs-backend.galera.db.name`                                 | Name for an OpenMRS database                                                                                           | `"openmrs"`                                               |
+| `openmrs-backend.galera.db.user`                                 | Name for a DB user                                                                                                     | `"openmrs"`                                               |
+| `openmrs-backend.galera.db.password`                             | Name for a DB user's password                                                                                          | `"OpenMRS123"`                                            |
+| `openmrs-backend.elasticsearch.enabled`                          | Create Elastic Search Cluster                                                                                          | `"true"`                                                  |
+| `openmrs-backend.elasticsearch.service.ports.restAPI`            | Port to expose Elastic search API                                                                                      | `"9200"`                                                  |
+| `openmrs-backend.elasticsearch.master.masterOnly`                | Make master assume all roles (masterOnly: false)                                                                       | `"false"`                                                 |
+| `openmrs-backend.elasticsearch.master.replicaCount`              | No of replicas of master                                                                                               | `"1"`                                                     |
+| `openmrs-backend.elasticsearch.master.heapSize`                  | Elasticsearch master-eligible node heap size                                                                           | `"128m"`                                                  |
+| `openmrs-backend.elasticsearch.master.resources`                 | Set container requests and limits for different resources like CPU or memory <br/>(essential for production workloads) | `"{}"`                                                    |
+| `openmrs-backend.elasticsearch.master.persistence.enabled`       | Enable persistence using a PersistentVolumeClaim                                                                       | `"true"`                                                  |
+| `openmrs-backend.elasticsearch.master.persistence.size`          | Persistent Volume Size                                                                                                 | `"8Gi"`                                                   |
+| `openmrs-backend.elasticsearch.data.replicaCount`                | No of replicas of data Node                                                                                            | `"0"`                                                     |
+| `openmrs-backend.elasticsearch.data.heapSize`                    | Elasticsearch data-eligible node heap size                                                                             | `"1024m"`                                                 |
+| `openmrs-backend.elasticsearch.data.resources`                   | Set container requests and limits for different resources like CPU or memory <br/>(essential for production workloads) | `"{}"`                                                    |
+| `openmrs-backend.elasticsearch.data.persistence.enabled`         | Enable persistence using a PersistentVolumeClaim                                                                       | `"true"`                                                  |
+| `openmrs-backend.elasticsearch.data.persistence.size`            | Persistent Volume Size                                                                                                 | `"8Gi"`                                                   |
+| `openmrs-backend.elasticsearch.coordinating.replicaCount`        | No of replicas of Coordinating node                                                                                    | `"0"`                                                     |
+| `openmrs-backend.elasticsearch.coordinating.heapSize`            | Elasticsearch coordinating-eligible node heap size                                                                     | `"128m"`                                                  |
+| `openmrs-backend.elasticsearch.coordinating.resources`           | Set container requests and limits for different resources like CPU or memory <br/>(essential for production workloads) | `"{}"`                                                    |
+| `openmrs-backend.elasticsearch.ingest.replicaCount`              | No of replicas of Ingest node                                                                                          | `"0"`                                                     |
+| `openmrs-backend.elasticsearch.ingest.heapSize`                  | Elasticsearch ingest-eligible node heap size                                                                           | `"128m"`                                                  |
+| `openmrs-backend.elasticsearch.ingest.resources`                 | Set container requests and limits for different resources like CPU or memory <br/>(essential for production workloads) | `"{}"`                                                    |
+
+See [MariaDB](https://github.com/bitnami/charts/blob/main/bitnami/mariadb/README.md) helm chart for other MariaDB parameters.
+
+See [ElasticSearch](https://github.com/bitnami/charts/blob/main/bitnami/elasticsearch/README.md) helm chart for other ElasticSearch parameters.
+
+### Terraform and AWS
+
+#### Setting up terraform and AWS
+
+1. Install [Terraform](https://learn.hashicorp.com/tutorials/terraform/install-cli)
+
+
+      brew install tfenv 
+      tfenv install 1.9.5
+
+
+2. Install [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+
+
+      brew install awscli
+      aws configure
+
+
+#### Initialize Terraform backend (one time operation)
+
+To Initialize terraform backend run:
+
+
+      cd terraform-backend
+      terraform init
+      terraform apply
+      cd ..
+
+#### Running Terraform
+
+
+1. Deploy the cluster and supporting services
+
+
+      cd terraform/
+      terraform init
+      terraform apply -var-file=nonprod.tfvars
+
+
+2. Run helm to deploy ALB controller and OpenMRS
+
+
+      cd terraform-helm/
+      terraform init
+      terraform apply -var-file=nonprod.tfvars
+
+
+3. Configure kubectl client to monitor your cluster (optionally)
+
+      
+      aws eks update-kubeconfig --name openmrs-cluster-nonprod
+
+
+## Development Setup
+
+### Setting up pre-commit hooks
+
+This is a one-time setup that needs to be run only when the repo is cloned.
+1. Install [pre-commit](https://pre-commit.com/#install)
+
+
+      brew install pre-commit
+
+
+2. Install pre-commit dependencies
+
+    - [terrascan](https://github.com/accurics/terrascan)
+    - [tfsec](https://github.com/aquasecurity/tfsec#installation)
+    - [tflint](https://github.com/terraform-linters/tflint#installation)
+   
+
+      brew install terrascan tfsec tflint
+
+
+3. Initialise pre-commit hooks
+
+
+      pre-commit install --install-hooks
+
+
+Now before every commit, the hooks will be executed.
+
+### Developing Helm Charts
+
+Once you have local or AWS cluster setup (see above) and kubectl is pointing to your cluster you can run helm install 
+directly from source. To verify you kubectl is connected to the correct cluster run:
+
+
+      kubectl cluster-info
+
+
+If you need to change your kubectl cluster run:
+
+
+      # For AWS
+      aws eks update-kubeconfig --name openmrs-cluster-nonprod
+      
+      # For local Kind cluster
+      kubectl cluster-info --context kind-kind
+
+
+To install Helm Charts from source run (see above for possible settings):
+
+
+      cd helm/openmrs
+      helm upgrade --install --create-namespace -n openmrs --values ../kind-openmrs.yaml openmrs .
+
+
+If you made any changes in helm/openmrs-backend or helm/openmrs-frontend or helm/openmrs-gateway you need to update 
+dependencies and run helm upgrade.
+
+
+      # form helm/openmrs dir
+      helm dependency update
+      helm upgrade openmrs .
+
+### Releasing Helm Charts
+
+      PACKAGE_VERSION=1.0.0 # same as in Chart.yaml
+      helm registry login ghcr.io -u YOUR_GITHUB_USER
+      # As password provide personal access token
+      cd openmrs-backend
+      helm package .
+      helm push openmrs-backend-$PACKAGE_VERSION.tgz oci://ghcr.io/openmrs/
+      cd ../openmrs-frontend
+      helm package .
+      helm push openmrs-frontend-$PACKAGE_VERSION.tgz oci://ghcr.io/openmrs/
+      cd ../openmrs
+      helm package .
+      helm push openmrs-$PACKAGE_VERSION.tgz oci://ghcr.io/openmrs/
+
+
+## Directory Structure
+```
+helm                              # helm charts
+terraform-backend                 # terraform AWS backend setup
+terraform                         # terraform AWS setup
+├── ...
+├── aws
+├── ├── policies                  # aws custom policies
+├── ├── roles                     # aws custom roles
+|── modules                       # contains reusable resources across environemts
+│   ├── vpc
+│   ├── eks
+│   ├── ....
+│   ├── main.tf                   # File where provider and modules are initialized
+│   ├── variables.tf
+│   ├── nonprod.tfvars            # values for nonprod environment
+│   ├── outputs.tf
+│   ├── config.s3.tfbackend       # backend config values for s3 backend
+└── ...
+terraform-helm                    # terraform Helm installer
+```

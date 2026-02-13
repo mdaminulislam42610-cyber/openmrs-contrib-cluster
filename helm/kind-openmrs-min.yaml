@@ -1,0 +1,13 @@
+global:
+  defaultStorageClass: standard
+  defaultIngessClass: nginx
+mariadb:
+  auth:
+    rootPassword: Root123
+    replicationPassword: Replicate123
+    database: openmrs
+    username: openmrs
+    password: OpenMRS123
+
+
+

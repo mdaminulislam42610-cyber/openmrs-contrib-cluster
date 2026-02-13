@@ -1,0 +1,3 @@
+bucket         = "openmrs-terraform-global"
+dynamodb_table = "openmrs-terraform-global-locks"
+region         = "us-east-2"

@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "openmrs-backend.fullname" . }}
+  labels:
+    {{- include "openmrs-backend.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "openmrs-backend.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "openmrs-backend.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "openmrs-backend.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: workdir
+          emptyDir: { }
+
+      {{ if or (.Values.galera.enabled) (.Values.mariadb.enabled) }}
+      initContainers:
+        - name: resolve-mariadb-hosts
+          image: bitnamilegacy/kubectl:1.33.4
+          envFrom:
+            - configMapRef:
+                name: {{ include "openmrs-backend.fullname" . }}
+          command:
+            - sh
+            - -c
+            - |
+              echo "Resolving MariaDB hosts..."
+              HOSTS=""
+              {{ if .Values.galera.enabled }}
+              SERVICE={{ .Release.Name }}-galera
+              STATEFULSET=$SERVICE
+              REPLICA_COUNT=$(kubectl get statefulset $STATEFULSET -n {{ .Release.Namespace }} -o jsonpath='{.spec.replicas}')
+              for i in $(seq 0 $((REPLICA_COUNT-1))); do
+                POD_FQDN="$STATEFULSET-${i}.${SERVICE}-headless.{{ .Release.Namespace }}.svc.cluster.local"
+                if [ -z "$HOSTS" ]; then
+                  HOSTS="$POD_FQDN"
+                else
+                  HOSTS="$HOSTS,$POD_FQDN"
+                fi
+              done
+              MODE="loadbalance"
+              {{ else if .Values.mariadb.enabled }}
+              SERVICE={{ .Release.Name }}-mariadb
+              {{ if eq .Values.mariadb.architecture "standalone" }}
+              # Standalone mode - use primary service directly
+              HOSTS="${SERVICE}.{{ .Release.Namespace }}.svc.cluster.local"
+              MODE=""
+              {{ else }}
+              # Replication mode - resolve primary and secondary
+              STATEFULSET=$SERVICE-secondary
+              REPLICA_COUNT=$(kubectl get statefulset $STATEFULSET -n {{ .Release.Namespace }} -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+              HOSTS="$SERVICE-primary-0.${SERVICE}-headless.{{ .Release.Namespace }}.svc.cluster.local"
+              for i in $(seq 0 $((REPLICA_COUNT-1))); do
+                POD_FQDN="$STATEFULSET-${i}.${SERVICE}-headless.{{ .Release.Namespace }}.svc.cluster.local"
+                HOSTS="$HOSTS,$POD_FQDN"
+              done
+              MODE="replication"
+              {{ end }}
+              {{ end }}
+              {{ if .Values.galera.enabled }}
+              echo "jdbc:mariadb:$MODE://$HOSTS:3306/$OMRS_DB_NAME?autoReconnect=true&sessionVariables=default_storage_engine=InnoDB&useUnicode=true&characterEncoding=UTF-8" > /work-dir/jdbc-url.txt
+              {{ else if .Values.mariadb.enabled }}
+              {{ if eq .Values.mariadb.architecture "standalone" }}
+              echo "jdbc:mariadb://$HOSTS:3306/$OMRS_DB_NAME?autoReconnect=true&sessionVariables=default_storage_engine=InnoDB&useUnicode=true&characterEncoding=UTF-8" > /work-dir/jdbc-url.txt
+              {{ else }}
+              echo "jdbc:mariadb:$MODE://$HOSTS:3306/$OMRS_DB_NAME?autoReconnect=true&sessionVariables=default_storage_engine=InnoDB&useUnicode=true&characterEncoding=UTF-8" > /work-dir/jdbc-url.txt
+              {{ end }}
+              {{ end }}
+              echo "JDBC URL written: $(cat /work-dir/jdbc-url.txt)"
+          volumeMounts:
+            - name: workdir
+              mountPath: /work-dir
+      {{ end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.startupProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "openmrs-backend.fullname" . }}
+            - secretRef:
+                name: {{ include "openmrs-backend.fullname" . }}
+          volumeMounts:
+            - name: workdir
+              mountPath: /work-dir
+            - name: data
+              mountPath: /openmrs/data
+          {{ if or (.Values.galera.enabled) (.Values.mariadb.enabled) }}
+          command:
+            - sh
+            - -c
+            - |
+              echo "Reading JDBC URL from /work-dir/jdbc-url.txt"
+              export OMRS_DB_URL=$(cat /work-dir/jdbc-url.txt)
+              echo "OMRS_DB_URL=$OMRS_DB_URL"
+              exec /openmrs/startup.sh
+          {{ end }}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        storageClassName: {{ .Values.global.defaultStorageClass | quote }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size | quote }}
+  {{- end }}
+
