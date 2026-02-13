@@ -58,9 +58,12 @@ kubectl create namespace openmrs
 ### Step 2: Deploy MariaDB Database (Standalone)
 
 First, deploy only the database to ensure it's running and accessible:
+git clone 
+
+git clone https://github.com/mdaminulislam42610-cyber/openmrs-contrib-cluster.git
 
 ```bash
-cd helm/openmrs-backend
+cd openmrs-contrib-cluster/helm/openmrs-backend
 
 # IMPORTANT: Add Bitnami Helm repository first (if not already added)
 helm repo add bitnami https://charts.bitnami.com/bitnami
@@ -109,6 +112,9 @@ kubectl exec -it -n openmrs $(kubectl get pod -n openmrs -l app.kubernetes.io/na
 Once MariaDB is running, deploy the backend:
 
 ```bash
+# If you deployed MariaDB separately (openmrs-db), delete the conflicting ingress first
+kubectl delete ingress -n openmrs openmrs-db-openmrs-backend 2>/dev/null || true
+
 # Deploy backend (MariaDB will be skipped if already exists)
 helm upgrade --install openmrs-backend . \
   --namespace openmrs \
