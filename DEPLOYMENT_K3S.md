@@ -2,6 +2,18 @@
 
 This guide will help you deploy OpenMRS on a single-node k3s cluster, which is perfect for Proxmox VMs or local development.
 
+## Quick Start for Proxmox VM
+
+If you're deploying on a Proxmox VM and want to access OpenMRS at `http://<VM_IP>/openmrs` (e.g., `http://192.168.1.172/openmrs`):
+
+1. **Configure ingress controller as NodePort** (see Prerequisites section below)
+2. **Deploy OpenMRS** following the deployment steps
+3. **Access at:** `http://<YOUR_VM_IP>/openmrs/spa/home`
+
+**Example:** If your VM IP is `192.168.1.172`:
+- Frontend: http://192.168.1.172/openmrs/spa/home
+- Backend API: http://192.168.1.172/openmrs/
+
 ## Prerequisites
 
 1. **k3s installed** on your Proxmox VM or local machine
@@ -45,6 +57,15 @@ This guide will help you deploy OpenMRS on a single-node k3s cluster, which is p
      --for=condition=ready pod \
      --selector=app.kubernetes.io/component=controller \
      --timeout=90s
+   
+   # IMPORTANT for Proxmox VM access: Configure ingress controller as NodePort
+   # This allows access via VM IP address (e.g., http://192.168.1.172/openmrs)
+   kubectl patch svc ingress-nginx-controller -n ingress-nginx \
+     -p '{"spec":{"type":"NodePort","ports":[{"port":80,"targetPort":80,"protocol":"TCP","name":"http"},{"port":443,"targetPort":443,"protocol":"TCP","name":"https"}]}}'
+   
+   # Verify the service is configured as NodePort
+   kubectl get svc -n ingress-nginx ingress-nginx-controller
+   # You should see ports like 80:3XXXX/TCP and 443:3YYYY/TCP
    ```
 
 ## Deployment Steps (Individual Components)
@@ -188,37 +209,280 @@ kubectl wait --namespace openmrs \
 
 ## Accessing OpenMRS
 
-### Option 1: Port Forwarding (Local Access)
+### Quick Check - Verify Everything is Running
+
+First, verify all components are ready:
 
 ```bash
-# Forward ingress controller port
+# Check all pods are running
+kubectl get pods -n openmrs
+
+# Check ingress is configured
+kubectl get ingress -n openmrs
+
+# Check ingress controller is running
+kubectl get pods -n ingress-nginx
+```
+
+Expected output:
+- All pods should show status "Running" or "Ready"
+- Ingress should show "ADDRESS" (may be empty on single node, that's OK)
+
+### Option 1: Access via Proxmox VM IP (Recommended for Proxmox)
+
+**For Proxmox VM deployments, access OpenMRS directly via VM IP:**
+
+```bash
+# First, ensure ingress controller is configured as NodePort
+kubectl get svc -n ingress-nginx ingress-nginx-controller
+
+# If type is not NodePort, configure it:
+kubectl patch svc ingress-nginx-controller -n ingress-nginx \
+  -p '{"spec":{"type":"NodePort","ports":[{"port":80,"targetPort":80,"protocol":"TCP","name":"http"},{"port":443,"targetPort":443,"protocol":"TCP","name":"https"}]}}'
+
+# Get your VM IP (replace with your actual IP)
+# Example: 192.168.1.172
+kubectl get nodes -o wide
+```
+
+**Access OpenMRS via your Proxmox VM IP:**
+
+- **Frontend (Main Application):** 
+  - http://192.168.1.172/openmrs/spa/home
+  - Or: http://192.168.1.172/openmrs/spa
+
+- **Backend API:**
+  - http://192.168.1.172/openmrs/
+  - Health check: http://192.168.1.172/openmrs/health/alive
+
+**Default Login Credentials:**
+- Username: `admin`
+- Password: `Admin123` (or check OpenMRS documentation for default credentials)
+
+**Troubleshooting Proxmox access:**
+
+1. **If port 80 doesn't work, check NodePort:**
+   ```bash
+   kubectl get svc -n ingress-nginx ingress-nginx-controller
+   # Look for port like 80:31234/TCP - use the 31234 number
+   # Access via: http://192.168.1.172:31234/openmrs/spa/home
+   ```
+
+2. **Check firewall on Proxmox VM:**
+   ```bash
+   sudo ufw status
+   # If needed, allow ports:
+   sudo ufw allow 80/tcp
+   sudo ufw allow 443/tcp
+   ```
+
+3. **Test from VM itself:**
+   ```bash
+   curl http://localhost/openmrs/health/alive
+   curl http://192.168.1.172/openmrs/health/alive
+   ```
+
+### Option 2: Port Forwarding (For Local Testing)
+
+If you want to test locally first:
+
+```bash
+# Forward ingress controller port (run this in a separate terminal or background)
 kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 8080:80
 
-# Access OpenMRS at:
-# Frontend: http://localhost:8080/openmrs/spa/home
-# Backend API: http://localhost:8080/openmrs/
+# Keep this terminal open, or run in background:
+# kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 8080:80 &
 ```
 
-### Option 2: NodePort (Direct Access)
+**Then open your browser and visit:**
 
-If you want to access directly via node IP:
+- **OpenMRS Frontend (Main Application):** 
+  - http://localhost:8080/openmrs/spa/home
+  - Or just: http://localhost:8080/openmrs/spa
+
+- **OpenMRS Backend API:**
+  - http://localhost:8080/openmrs/
+  - Health check: http://localhost:8080/openmrs/health/alive
+
+### Option 3: Direct Service Port Forward (Alternative)
+
+If ingress doesn't work, you can access services directly:
 
 ```bash
-# Get node IP
-kubectl get nodes -o wide
+# Forward backend service directly
+kubectl port-forward -n openmrs svc/openmrs-backend 8080:8080
+# Access at: http://localhost:8080/openmrs/
 
-# Access via node IP (if NodePort is configured)
-# Check ingress controller service type
-kubectl get svc -n ingress-nginx ingress-nginx-controller
+# Forward frontend service directly  
+kubectl port-forward -n openmrs svc/openmrs-frontend 3000:80
+# Access at: http://localhost:3000
 ```
 
-### Option 3: LoadBalancer (If supported)
+### Option 4: LoadBalancer (If MetalLB is installed)
 
-If your k3s setup supports LoadBalancer (e.g., with MetalLB):
+If you have MetalLB installed on k3s:
 
 ```bash
 # Check if LoadBalancer IP is assigned
 kubectl get svc -n ingress-nginx ingress-nginx-controller
+
+# If an EXTERNAL-IP is shown, access via:
+# http://<EXTERNAL-IP>/openmrs/spa/home
+```
+
+### Troubleshooting Access Issues
+
+**If you get a 404 error when accessing OpenMRS:**
+
+**Step 1: Verify all components are running**
+```bash
+# Check all pods are running
+kubectl get pods -n openmrs
+# Expected: All pods should show "Running" status
+
+# Check ingress controller
+kubectl get pods -n ingress-nginx
+# Should show ingress-nginx-controller running
+```
+
+**Step 2: Check ingress configuration**
+```bash
+# List all ingress resources
+kubectl get ingress -n openmrs
+
+# Describe ingress to see detailed configuration
+kubectl describe ingress -n openmrs
+
+# Check if ingress has the correct paths
+kubectl get ingress -n openmrs -o yaml
+# Look for paths: /openmrs/ and /openmrs/spa
+```
+
+**Step 3: Verify services exist and are correct**
+```bash
+# Check services
+kubectl get svc -n openmrs
+
+# Verify backend service
+kubectl get svc -n openmrs openmrs-backend -o yaml
+
+# Verify frontend service
+kubectl get svc -n openmrs openmrs-frontend -o yaml
+```
+
+**Step 4: Test services directly (bypass ingress)**
+```bash
+# Test backend service directly
+kubectl port-forward -n openmrs svc/openmrs-backend 8080:8080
+# In another terminal or browser, test:
+curl http://localhost:8080/openmrs/health/alive
+# Should return JSON response
+
+# Test frontend service directly
+kubectl port-forward -n openmrs svc/openmrs-frontend 3000:80
+# In browser: http://localhost:3000
+```
+
+**Step 5: Check ingress controller logs**
+```bash
+# Check ingress controller logs for routing errors
+kubectl logs -n ingress-nginx -l app.kubernetes.io/component=controller --tail=100
+
+# Look for errors like:
+# - "no upstream"
+# - "404"
+# - "service not found"
+```
+
+**Step 6: Verify ingress controller is receiving traffic**
+```bash
+# Check ingress controller service
+kubectl get svc -n ingress-nginx ingress-nginx-controller
+
+# Test if ingress controller is responding
+curl -H "Host: $(kubectl get ingress -n openmrs -o jsonpath='{.items[0].spec.rules[0].host}')" \
+  http://localhost/openmrs/health/alive
+
+# Or test directly
+curl http://192.168.1.172/openmrs/health/alive
+```
+
+**Step 7: Common fixes for 404 errors**
+
+**Fix 1: Recreate ingress if misconfigured**
+```bash
+# Delete and let Helm recreate
+kubectl delete ingress -n openmrs --all
+# Then upgrade the Helm release
+helm upgrade openmrs-backend . -n openmrs --reuse-values
+helm upgrade openmrs-frontend ../openmrs-frontend -n openmrs --reuse-values
+```
+
+**Fix 2: Check if backend is actually ready**
+```bash
+# Check backend logs
+kubectl logs -n openmrs -l app.kubernetes.io/name=openmrs-backend --tail=50
+
+# Check if backend health endpoint works
+kubectl exec -n openmrs $(kubectl get pod -n openmrs -l app.kubernetes.io/name=openmrs-backend -o jsonpath='{.items[0].metadata.name}') -- \
+  curl -s http://localhost:8080/openmrs/health/alive
+```
+
+**Fix 3: Verify ingress paths match**
+```bash
+# Backend should have path: /openmrs/
+kubectl get ingress -n openmrs openmrs-backend -o jsonpath='{.spec.rules[0].http.paths[0].path}'
+# Should output: /openmrs/
+
+# Frontend should have path: /openmrs/spa
+kubectl get ingress -n openmrs openmrs-frontend -o jsonpath='{.spec.rules[0].http.paths[0].path}'
+# Should output: /openmrs/spa(/|$)(.*)
+```
+
+**Fix 4: Check ingress controller annotations**
+```bash
+# Verify ingress has correct class
+kubectl get ingress -n openmrs -o jsonpath='{.items[*].spec.ingressClassName}'
+# Should output: nginx
+
+# If empty, add it:
+kubectl patch ingress -n openmrs openmrs-backend -p '{"spec":{"ingressClassName":"nginx"}}'
+kubectl patch ingress -n openmrs openmrs-frontend -p '{"spec":{"ingressClassName":"nginx"}}'
+```
+
+**Fix 5: Restart ingress controller (if needed)**
+```bash
+# Restart ingress controller pods
+kubectl rollout restart deployment -n ingress-nginx ingress-nginx-controller
+
+# Wait for it to be ready
+kubectl rollout status deployment -n ingress-nginx ingress-nginx-controller
+```
+
+**Quick diagnostic script:**
+```bash
+#!/bin/bash
+echo "=== Checking OpenMRS Deployment ==="
+echo ""
+echo "1. Pods:"
+kubectl get pods -n openmrs
+echo ""
+echo "2. Services:"
+kubectl get svc -n openmrs
+echo ""
+echo "3. Ingress:"
+kubectl get ingress -n openmrs
+echo ""
+echo "4. Ingress Details:"
+kubectl describe ingress -n openmrs
+echo ""
+echo "5. Testing backend health (from pod):"
+BACKEND_POD=$(kubectl get pod -n openmrs -l app.kubernetes.io/name=openmrs-backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+if [ ! -z "$BACKEND_POD" ]; then
+  kubectl exec -n openmrs $BACKEND_POD -- curl -s http://localhost:8080/openmrs/health/alive || echo "Backend not responding"
+else
+  echo "Backend pod not found"
+fi
 ```
 
 ## Verification
